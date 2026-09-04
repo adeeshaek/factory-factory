@@ -18,8 +18,8 @@
  * already being spoken for that session — a clause arriving mid-utterance is
  * dropped rather than queued, so the narration never falls behind into a
  * backlog. The moment the agent's final answer starts streaming, any
- * in-flight thinking utterance is cut short (Deepgram's own `Clear` control
- * message) and narration switches to the final answer.
+ * in-flight thinking utterance is cut short (Deepgram's own `Interrupt`
+ * control message) and narration switches to the final answer.
  *
  * The final answer is narrated the same clause-by-clause way, not
  * accumulated silently and spoken all at once at turn-complete — for a long
@@ -46,7 +46,7 @@ import type { VoiceServerMessage } from '@/shared/websocket/voice-message.schema
 
 const logger = createLogger('voice-narration');
 
-const DEEPGRAM_TTS_URL = 'wss://api.deepgram.com/v1/speak';
+const DEEPGRAM_TTS_URL = 'wss://api.deepgram.com/v2/speak';
 const TTS_ENCODING = 'linear16';
 const TTS_SAMPLE_RATE = 24_000;
 
@@ -507,13 +507,13 @@ class VoiceNarrationService {
     }
     try {
       if (active.socket.readyState === WebSocket.OPEN) {
-        active.socket.send(JSON.stringify({ type: 'Clear' }));
+        active.socket.send(JSON.stringify({ type: 'Interrupt' }));
       }
-      // Otherwise still CONNECTING: there's nothing to Clear yet, but the
+      // Otherwise still CONNECTING: there's nothing to interrupt yet, but the
       // pending 'open' handler checks `cancelled` and will settle without
       // ever speaking the superseded text.
     } catch (error) {
-      logger.error('Failed to clear in-flight Deepgram TTS narration', {
+      logger.error('Failed to interrupt in-flight Deepgram TTS narration', {
         error: error instanceof Error ? error.message : String(error),
         sessionId,
       });
@@ -646,11 +646,11 @@ class VoiceNarrationService {
             return;
           }
           if (isBinary) {
-            // Deepgram's `Clear` (sent by clearActiveNarration) stops *new*
-            // synthesis, but audio already in flight when the cancellation
-            // was requested keeps arriving until the `Cleared` ack — forward
-            // it and stale reasoning audio can resume playing underneath
-            // the answer that just cut it off.
+            // Deepgram's `Interrupt` (sent by clearActiveNarration) stops
+            // *new* synthesis, but audio already in flight when the
+            // cancellation was requested keeps arriving until the
+            // `SpeechInterrupted` ack — forward it and stale reasoning audio
+            // can resume playing underneath the answer that just cut it off.
             if (active.cancelled) {
               return;
             }
@@ -684,7 +684,7 @@ class VoiceNarrationService {
     }
   }
 
-  /** Handles Deepgram's Flushed (utterance complete) and Cleared (interrupted) control messages. */
+  /** Handles Deepgram's Flushed (utterance complete) and SpeechInterrupted (interrupted) control messages. */
   private handleTtsControlMessage(
     ttsSocket: WebSocket,
     message: { type: string } | null,
@@ -697,7 +697,7 @@ class VoiceNarrationService {
         // Connection is already going away; finish() closes it regardless.
       }
       finish();
-    } else if (message?.type === 'Cleared') {
+    } else if (message?.type === 'SpeechInterrupted') {
       // Interrupted mid-utterance (thinking cut short by the final answer).
       finish();
     }

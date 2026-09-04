@@ -241,7 +241,7 @@ const mockUserSettings: UserSettings = {
   // assertions below).
   voiceModeEnabled: true,
   deepgramApiKeyEncrypted: null,
-  voiceTtsModel: 'aura-2-apollo-en',
+  voiceTtsModel: 'flux-haley-en',
   voiceTtsSpeed: 1.3,
   voiceUtteranceEndMs: 2500,
   voiceBargeInSustainedMs: 24,
@@ -373,7 +373,7 @@ function createImportData(
         // Non-default so the import test below actually exercises restoring
         // a persisted preference, not just the schema's own default.
         voiceModeEnabled: true,
-        voiceTtsModel: 'aura-2-apollo-en',
+        voiceTtsModel: 'flux-haley-en',
         voiceTtsSpeed: 1.3,
         voiceUtteranceEndMs: 2500,
         voiceBargeInSustainedMs: 24,
@@ -418,7 +418,7 @@ describe('DataBackupService', () => {
           defaultWorkspacePermissions: 'STRICT',
           ratchetPermissions: 'YOLO',
           voiceModeEnabled: true,
-          voiceTtsModel: 'aura-2-apollo-en',
+          voiceTtsModel: 'flux-haley-en',
           voiceTtsSpeed: 1.3,
           voiceUtteranceEndMs: 2500,
           voiceBargeInSustainedMs: 24,
@@ -664,7 +664,7 @@ describe('DataBackupService', () => {
         data: expect.objectContaining({
           ratchetReviewTriggerMode: 'ALL_REVIEW_FEEDBACK',
           voiceModeEnabled: true,
-          voiceTtsModel: 'aura-2-apollo-en',
+          voiceTtsModel: 'flux-haley-en',
           voiceTtsSpeed: 1.3,
           voiceUtteranceEndMs: 2500,
           voiceBargeInSustainedMs: 24,

@@ -34,7 +34,7 @@ describe('voiceRouter', () => {
       mockUserSettingsQueryService.get.mockResolvedValue({
         voiceModeEnabled: true,
         deepgramApiKeyEncrypted: 'encrypted:dg_secret',
-        voiceTtsModel: 'aura-2-thalia-en',
+        voiceTtsModel: 'flux-haley-en',
         voiceTtsSpeed: 1,
       });
 
@@ -48,7 +48,7 @@ describe('voiceRouter', () => {
       mockUserSettingsQueryService.get.mockResolvedValue({
         voiceModeEnabled: false,
         deepgramApiKeyEncrypted: null,
-        voiceTtsModel: 'aura-2-thalia-en',
+        voiceTtsModel: 'flux-haley-en',
         voiceTtsSpeed: 1,
       });
 
@@ -61,15 +61,13 @@ describe('voiceRouter', () => {
       mockUserSettingsQueryService.get.mockResolvedValue({
         voiceModeEnabled: true,
         deepgramApiKeyEncrypted: 'encrypted:dg_secret',
-        voiceTtsModel: 'aura-2-apollo-en',
+        voiceTtsModel: 'flux-jack-en',
         voiceTtsSpeed: 1.3,
       });
 
       const result = await createCaller().getConfig();
 
-      expect(result).toEqual(
-        expect.objectContaining({ ttsModel: 'aura-2-apollo-en', ttsSpeed: 1.3 })
-      );
+      expect(result).toEqual(expect.objectContaining({ ttsModel: 'flux-jack-en', ttsSpeed: 1.3 }));
     });
   });
 
@@ -207,25 +205,23 @@ describe('voiceRouter', () => {
       mockUserSettingsQueryService.get.mockResolvedValue({
         voiceModeEnabled: true,
         deepgramApiKeyEncrypted: 'encrypted:dg_existing',
-        voiceTtsModel: 'aura-2-luna-en',
+        voiceTtsModel: 'flux-priya-en',
         voiceTtsSpeed: 1.2,
       });
 
       const result = await createCaller().updateConfig({
         enabled: true,
-        ttsModel: 'aura-2-luna-en',
+        ttsModel: 'flux-priya-en',
         ttsSpeed: 1.2,
       });
 
       expect(mockUserSettingsQueryService.update).toHaveBeenCalledWith({
         voiceModeEnabled: true,
         deepgramApiKeyEncrypted: undefined,
-        voiceTtsModel: 'aura-2-luna-en',
+        voiceTtsModel: 'flux-priya-en',
         voiceTtsSpeed: 1.2,
       });
-      expect(result).toEqual(
-        expect.objectContaining({ ttsModel: 'aura-2-luna-en', ttsSpeed: 1.2 })
-      );
+      expect(result).toEqual(expect.objectContaining({ ttsModel: 'flux-priya-en', ttsSpeed: 1.2 }));
     });
   });
 

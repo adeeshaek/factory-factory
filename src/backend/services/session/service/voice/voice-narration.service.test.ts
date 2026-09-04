@@ -15,8 +15,8 @@ const FakeDeepgramSocket = vi.hoisted(() => {
   class FakeDeepgramSocket {
     // Mirrors real `ws`: a socket starts CONNECTING and only transitions to
     // OPEN when its 'open' event fires — matters for tests that assert on
-    // behavior gated by readyState (e.g. clearActiveNarration's Clear-only-
-    // if-OPEN check) before ever emitting 'open'.
+    // behavior gated by readyState (e.g. clearActiveNarration's Interrupt-
+    // only-if-OPEN check) before ever emitting 'open'.
     static CONNECTING = 0;
     static OPEN = 1;
     static CLOSING = 2;
@@ -143,7 +143,7 @@ describe('voiceNarrationService', () => {
     mockUserSettingsService.get.mockResolvedValue({
       voiceModeEnabled: true,
       deepgramApiKeyEncrypted: 'enc:dg_secret',
-      voiceTtsModel: 'aura-2-thalia-en',
+      voiceTtsModel: 'flux-haley-en',
       voiceTtsSpeed: 1,
     });
   });
@@ -259,7 +259,7 @@ describe('voiceNarrationService', () => {
     await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 1);
     const ttsSocket = FakeDeepgramSocket.instances[0] as InstanceType<typeof FakeDeepgramSocket>;
 
-    expect(ttsSocket.url).toContain('wss://api.deepgram.com/v1/speak');
+    expect(ttsSocket.url).toContain('wss://api.deepgram.com/v2/speak');
     expect(mockCryptoService.decrypt).toHaveBeenCalledWith('enc:dg_secret');
 
     ttsSocket.emit('open');
@@ -321,7 +321,7 @@ describe('voiceNarrationService', () => {
     voiceNarrationService.cancelNarration('sess-cancel');
 
     // Cancels the in-flight clause's Deepgram synthesis...
-    expect(JSON.parse(active.sentMessages.at(-1) as string)).toEqual({ type: 'Clear' });
+    expect(JSON.parse(active.sentMessages.at(-1) as string)).toEqual({ type: 'Interrupt' });
     // ...and tells the client to drop whatever's already scheduled locally.
     expect(clientWs.send).toHaveBeenCalledWith(JSON.stringify({ type: 'clear_playback' }));
 
@@ -352,7 +352,7 @@ describe('voiceNarrationService', () => {
     // to finish on its own.
     emitRuntimeUpdate('sess-new-turn', 'WORKING');
 
-    expect(JSON.parse(active.sentMessages.at(-1) as string)).toEqual({ type: 'Clear' });
+    expect(JSON.parse(active.sentMessages.at(-1) as string)).toEqual({ type: 'Interrupt' });
     expect(clientWs.send).toHaveBeenCalledWith(JSON.stringify({ type: 'clear_playback' }));
 
     unregister('sess-new-turn', clientWs as never);
@@ -420,8 +420,9 @@ describe('voiceNarrationService', () => {
     voiceNarrationService.cancelNarration('sess-cancelled-audio');
     clientWs.send.mockClear();
 
-    // Audio already in flight when Clear was requested keeps arriving until
-    // Deepgram's Cleared ack — it must not be forwarded to the client.
+    // Audio already in flight when Interrupt was requested keeps arriving
+    // until Deepgram's SpeechInterrupted ack — it must not be forwarded to
+    // the client.
     socket.emit('message', Buffer.from([9, 9, 9]), true);
     expect(clientWs.send).not.toHaveBeenCalled();
 
@@ -518,8 +519,8 @@ describe('voiceNarrationService', () => {
       emitThinking('sess-thinking-2', 'First thought completed here. ');
       await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 1);
 
-      // Still speaking (no Flushed/Cleared yet) — this clause should be dropped,
-      // not queued, so the backlog never grows.
+      // Still speaking (no Flushed/SpeechInterrupted yet) — this clause
+      // should be dropped, not queued, so the backlog never grows.
       emitThinking('sess-thinking-2', 'Second thought completed here too. ');
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(FakeDeepgramSocket.instances).toHaveLength(1);
@@ -546,13 +547,13 @@ describe('voiceNarrationService', () => {
       thinkingSocket.emit('open');
 
       // Final answer starts streaming mid-thought — the in-flight thinking
-      // utterance must be cut short with Deepgram's Clear control message.
+      // utterance must be cut short with Deepgram's Interrupt control message.
       emitDelta('sess-thinking-3', {
         type: 'session_delta',
         data: { type: 'assistant_text_delta', text: 'The answer is 42.' },
       });
       expect(
-        thinkingSocket.sentMessages.some((m) => JSON.parse(m as string).type === 'Clear')
+        thinkingSocket.sentMessages.some((m) => JSON.parse(m as string).type === 'Interrupt')
       ).toBe(true);
 
       // The browser must also be told to drop any thinking audio it already
@@ -569,7 +570,11 @@ describe('voiceNarrationService', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(FakeDeepgramSocket.instances).toHaveLength(1);
 
-      thinkingSocket.emit('message', Buffer.from(JSON.stringify({ type: 'Cleared' })), false);
+      thinkingSocket.emit(
+        'message',
+        Buffer.from(JSON.stringify({ type: 'SpeechInterrupted' })),
+        false
+      );
 
       emitRuntimeUpdate('sess-thinking-3', 'IDLE');
 
@@ -620,7 +625,7 @@ describe('voiceNarrationService', () => {
         data: { type: 'assistant_text_delta', text: 'The answer is 42.' },
       });
 
-      // No Clear could be sent (the socket never opened), but the pending
+      // No Interrupt could be sent (the socket never opened), but the pending
       // 'open' handler must still refuse to speak once it does fire.
       expect(thinkingSocket.sentMessages).toHaveLength(0);
       thinkingSocket.emit('open');
@@ -663,7 +668,7 @@ describe('voiceNarrationService', () => {
       mockUserSettingsService.get.mockResolvedValue({
         voiceModeEnabled: true,
         deepgramApiKeyEncrypted: 'enc:dg_secret',
-        voiceTtsModel: 'aura-2-thalia-en',
+        voiceTtsModel: 'flux-haley-en',
         voiceTtsSpeed: 1,
       });
       emitThinking('sess-throws', 'This one should work fine now. ');
