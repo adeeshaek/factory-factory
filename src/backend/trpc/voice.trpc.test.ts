@@ -223,6 +223,23 @@ describe('voiceRouter', () => {
       });
       expect(result).toEqual(expect.objectContaining({ ttsModel: 'flux-priya-en', ttsSpeed: 1.2 }));
     });
+
+    it('rejects an in-range speed that is off the 0.05 increment Deepgram accepts', async () => {
+      // Bounds alone would admit 0.72; Deepgram then 400s at connect time, so
+      // the grid has to be enforced at the write boundary, not just by the
+      // slider's step attribute.
+      await expect(createCaller().updateConfig({ enabled: true, ttsSpeed: 0.72 })).rejects.toThrow(
+        /increments of 0.05/
+      );
+      expect(mockUserSettingsQueryService.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a speed outside the Flux range', async () => {
+      await expect(createCaller().updateConfig({ enabled: true, ttsSpeed: 0.25 })).rejects.toThrow(
+        /between 0.5 and 1.5/
+      );
+      expect(mockUserSettingsQueryService.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('mintGrantToken', () => {

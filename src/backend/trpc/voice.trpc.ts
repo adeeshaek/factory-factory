@@ -11,7 +11,9 @@ import type { ApplicationServices } from '@/backend/app-context';
 import {
   DEEPGRAM_TTS_SPEED_MAX,
   DEEPGRAM_TTS_SPEED_MIN,
+  DEEPGRAM_TTS_SPEED_STEP,
   isKnownDeepgramVoiceModel,
+  isValidDeepgramTtsSpeed,
 } from '@/shared/deepgram-voices';
 import {
   VOICE_BARGE_IN_SUSTAINED_MS_MAX,
@@ -155,7 +157,15 @@ export const voiceRouter = router({
           .min(1)
           .refine(isKnownDeepgramVoiceModel, 'Unknown Deepgram voice model')
           .optional(),
-        ttsSpeed: z.number().min(DEEPGRAM_TTS_SPEED_MIN).max(DEEPGRAM_TTS_SPEED_MAX).optional(),
+        // Bounds alone aren't enough: Deepgram also 400s on an in-range speed
+        // that isn't on the 0.05 grid the slider steps by.
+        ttsSpeed: z
+          .number()
+          .refine(
+            isValidDeepgramTtsSpeed,
+            `Speed must be between ${DEEPGRAM_TTS_SPEED_MIN} and ${DEEPGRAM_TTS_SPEED_MAX} in increments of ${DEEPGRAM_TTS_SPEED_STEP}`
+          )
+          .optional(),
         utteranceEndMs: z
           .number()
           .int()

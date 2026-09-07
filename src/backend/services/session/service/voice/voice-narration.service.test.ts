@@ -259,7 +259,12 @@ describe('voiceNarrationService', () => {
     await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 1);
     const ttsSocket = FakeDeepgramSocket.instances[0] as InstanceType<typeof FakeDeepgramSocket>;
 
-    expect(ttsSocket.url).toContain('wss://api.deepgram.com/v2/speak');
+    // Pin the whole query string, not just the endpoint: an Aura-2 model name
+    // or an off-grid speed is rejected by Flux at connect time, and a bare
+    // `/v2/speak` assertion would let either through.
+    expect(ttsSocket.url).toBe(
+      'wss://api.deepgram.com/v2/speak?model=flux-haley-en&encoding=linear16&sample_rate=24000&speed=1'
+    );
     expect(mockCryptoService.decrypt).toHaveBeenCalledWith('enc:dg_secret');
 
     ttsSocket.emit('open');

@@ -57,8 +57,49 @@ export const DEFAULT_DEEPGRAM_TTS_MODEL = 'flux-haley-en';
 // anywhere but the error message.
 export const DEEPGRAM_TTS_SPEED_MIN = 0.5;
 export const DEEPGRAM_TTS_SPEED_MAX = 1.5;
+export const DEEPGRAM_TTS_SPEED_STEP = 0.05;
 export const DEFAULT_DEEPGRAM_TTS_SPEED = 1;
 
 export function isKnownDeepgramVoiceModel(model: string): boolean {
   return DEEPGRAM_FLUX_ENGLISH_VOICES.some((voice) => voice.model === model);
+}
+
+/**
+ * Deepgram accepts speed only on the documented 0.05 grid — an in-range but
+ * off-grid value (0.72) still 400s. Compared in integer hundredths because
+ * `1.15 % 0.05` is not 0 in binary floating point.
+ */
+export function isValidDeepgramTtsSpeed(speed: number): boolean {
+  if (!Number.isFinite(speed)) {
+    return false;
+  }
+  if (speed < DEEPGRAM_TTS_SPEED_MIN || speed > DEEPGRAM_TTS_SPEED_MAX) {
+    return false;
+  }
+  return Math.round(speed * 100) % Math.round(DEEPGRAM_TTS_SPEED_STEP * 100) === 0;
+}
+
+/**
+ * Coerces a stored speed onto the nearest value Deepgram accepts. Used on the
+ * restore path, where a backup predating the current bounds would otherwise
+ * reinstate a speed that fails every TTS connection.
+ */
+export function normalizeDeepgramTtsSpeed(speed: number): number {
+  if (!Number.isFinite(speed)) {
+    return DEFAULT_DEEPGRAM_TTS_SPEED;
+  }
+  const clamped = Math.min(DEEPGRAM_TTS_SPEED_MAX, Math.max(DEEPGRAM_TTS_SPEED_MIN, speed));
+  const steps = Math.round((clamped - DEEPGRAM_TTS_SPEED_MIN) / DEEPGRAM_TTS_SPEED_STEP);
+  return Math.round((DEEPGRAM_TTS_SPEED_MIN + steps * DEEPGRAM_TTS_SPEED_STEP) * 100) / 100;
+}
+
+/**
+ * Maps an unrecognised voice — an `aura-2-*` name from a backup taken before
+ * the Flux upgrade, or a voice since retired from the catalog — onto the
+ * current default. The database migration does this for rows already stored;
+ * this covers the restore path, which writes backup values verbatim and never
+ * replays migrations.
+ */
+export function normalizeDeepgramVoiceModel(model: string): string {
+  return isKnownDeepgramVoiceModel(model) ? model : DEFAULT_DEEPGRAM_TTS_MODEL;
 }

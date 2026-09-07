@@ -507,6 +507,14 @@ class VoiceNarrationService {
     }
     try {
       if (active.socket.readyState === WebSocket.OPEN) {
+        // No `playback_offset`: it's optional, and the turn is cancelled
+        // either way. Supplying it would only add the
+        // `text_spoken`/`text_remaining` split to the `SpeechInterrupted`
+        // ack, which exists to reconcile what a caller heard back into LLM
+        // context. Nothing here reads it — the superseded thinking clause is
+        // discarded, not fed back — and sourcing a real offset would mean
+        // round-tripping playback position from the browser on every
+        // interrupt, with a monotonicity constraint across interrupts.
         active.socket.send(JSON.stringify({ type: 'Interrupt' }));
       }
       // Otherwise still CONNECTING: there's nothing to interrupt yet, but the

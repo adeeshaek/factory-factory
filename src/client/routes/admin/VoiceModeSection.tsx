@@ -20,6 +20,7 @@ import {
   DEEPGRAM_FLUX_ENGLISH_VOICES,
   DEEPGRAM_TTS_SPEED_MAX,
   DEEPGRAM_TTS_SPEED_MIN,
+  DEEPGRAM_TTS_SPEED_STEP,
   DEFAULT_DEEPGRAM_TTS_MODEL,
   DEFAULT_DEEPGRAM_TTS_SPEED,
 } from '@/shared/deepgram-voices';
@@ -432,7 +433,7 @@ export function VoiceModeSection() {
               }
               min={DEEPGRAM_TTS_SPEED_MIN}
               max={DEEPGRAM_TTS_SPEED_MAX}
-              step={0.05}
+              step={DEEPGRAM_TTS_SPEED_STEP}
               disabled={updateConfig.isPending || !hasStoredKey}
             />
           </div>
