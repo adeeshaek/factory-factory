@@ -64,10 +64,19 @@ export function isKnownDeepgramVoiceModel(model: string): boolean {
   return DEEPGRAM_FLUX_ENGLISH_VOICES.some((voice) => voice.model === model);
 }
 
+// Slack for binary floating point only: `0.5 + 13 * 0.05` is
+// 1.1500000000000001, so an exact comparison against a grid point would
+// reject speeds the slider itself produces. Far tighter than the 0.005 a
+// round-to-hundredths check would forgive.
+const SPEED_GRID_TOLERANCE = 1e-9;
+
 /**
  * Deepgram accepts speed only on the documented 0.05 grid — an in-range but
- * off-grid value (0.72) still 400s. Compared in integer hundredths because
- * `1.15 % 0.05` is not 0 in binary floating point.
+ * off-grid value (0.72) still 400s. Validated by distance to the nearest grid
+ * point rather than a modulo, so the grid has exactly one definition
+ * (`normalizeDeepgramTtsSpeed`) and a near-miss like 0.7011 is rejected
+ * instead of being silently rounded into range: the update path stores the
+ * number as given and narration sends it unchanged.
  */
 export function isValidDeepgramTtsSpeed(speed: number): boolean {
   if (!Number.isFinite(speed)) {
@@ -76,7 +85,7 @@ export function isValidDeepgramTtsSpeed(speed: number): boolean {
   if (speed < DEEPGRAM_TTS_SPEED_MIN || speed > DEEPGRAM_TTS_SPEED_MAX) {
     return false;
   }
-  return Math.round(speed * 100) % Math.round(DEEPGRAM_TTS_SPEED_STEP * 100) === 0;
+  return Math.abs(speed - normalizeDeepgramTtsSpeed(speed)) < SPEED_GRID_TOLERANCE;
 }
 
 /**

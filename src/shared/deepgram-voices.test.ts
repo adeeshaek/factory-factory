@@ -3,6 +3,7 @@ import {
   DEEPGRAM_FLUX_ENGLISH_VOICES,
   DEEPGRAM_TTS_SPEED_MAX,
   DEEPGRAM_TTS_SPEED_MIN,
+  DEEPGRAM_TTS_SPEED_STEP,
   DEFAULT_DEEPGRAM_TTS_MODEL,
   DEFAULT_DEEPGRAM_TTS_SPEED,
   isKnownDeepgramVoiceModel,
@@ -54,9 +55,28 @@ describe('isValidDeepgramTtsSpeed', () => {
     expect(isValidDeepgramTtsSpeed(0.85)).toBe(true);
   });
 
+  it('rejects near-misses that a round-to-hundredths check would forgive', () => {
+    // A `Math.round(speed * 100)` grid check accepts anything within 0.005 of
+    // a grid point. Nothing rounds the stored value afterwards — the update
+    // path persists the number as given and narration sends it verbatim — so
+    // these have to be rejected, not absorbed.
+    expect(isValidDeepgramTtsSpeed(0.7011)).toBe(false);
+    expect(isValidDeepgramTtsSpeed(0.6996)).toBe(false);
+    expect(isValidDeepgramTtsSpeed(1.1499)).toBe(false);
+  });
+
   it('rejects non-finite values', () => {
     expect(isValidDeepgramTtsSpeed(Number.NaN)).toBe(false);
     expect(isValidDeepgramTtsSpeed(Number.POSITIVE_INFINITY)).toBe(false);
+  });
+
+  it('accepts every grid point the slider can produce', () => {
+    // Guards the tolerance from both sides: too tight and float drift in
+    // `MIN + n * STEP` starts rejecting legitimate slider values.
+    for (let step = 0; step <= 20; step++) {
+      const speed = DEEPGRAM_TTS_SPEED_MIN + step * DEEPGRAM_TTS_SPEED_STEP;
+      expect(isValidDeepgramTtsSpeed(speed)).toBe(true);
+    }
   });
 });
 
