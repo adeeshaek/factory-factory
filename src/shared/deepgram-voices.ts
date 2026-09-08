@@ -52,17 +52,24 @@ export const DEEPGRAM_FLUX_ENGLISH_VOICES: DeepgramVoiceOption[] = [
 
 export const DEFAULT_DEEPGRAM_TTS_MODEL = 'flux-haley-en';
 
-// Flux TTS accepts speed 0.5-1.5 in 0.05 increments
-// (developers.deepgram.com/docs/tts-voice-controls, and the "Adjust speed
-// (0.5-1.5 in 0.05 steps)" line in docs/flux-tts/feature-overview). Out of
-// range is rejected as SPEED_OUT_OF_RANGE, off-increment as
+// Flux TTS accepts speed 0.5-1.5 in 0.05 increments. Two reference pages say
+// so verbatim, quoted here so cross-checking is a string match rather than a
+// hunt:
+//   docs/tts-voice-controls    "Flux TTS (/v2/speak) supports speed
+//                               (0.5-1.5 in 0.05 steps)"
+//   docs/flux-tts/feature-overview
+//                              "Adjust speed (0.5-1.5 in 0.05 steps)
+//                               without reconnecting"
+// Out of range is rejected as SPEED_OUT_OF_RANGE, off-increment as
 // SPEED_INCREMENT_INVALID — hence both the bounds and the grid check below.
 //
 // Note for anyone cross-checking: Flux's GA launch post says "seven values
 // from 0.85 to 1.15". That was the original range and it has since been
 // widened to 0.5-1.5, with every previously accepted value still valid. The
-// reference docs are current; the launch post is not. The 0.7 floor this
-// replaced was Aura-2's, which is a different endpoint.
+// reference docs are current; the launch post is not. Don't take 0.85 from a
+// blog post over the API reference. The 0.7 floor this replaced was Aura-2's
+// (which that same tts-voice-controls page lists as 0.7-1.5) — a different
+// endpoint, never evidence about /v2/speak.
 export const DEEPGRAM_TTS_SPEED_MIN = 0.5;
 export const DEEPGRAM_TTS_SPEED_MAX = 1.5;
 export const DEEPGRAM_TTS_SPEED_STEP = 0.05;
