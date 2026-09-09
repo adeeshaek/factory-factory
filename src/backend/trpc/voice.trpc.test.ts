@@ -234,6 +234,25 @@ describe('voiceRouter', () => {
       expect(mockUserSettingsQueryService.update).not.toHaveBeenCalled();
     });
 
+    it('snaps a float-slop speed onto the grid before persisting it', async () => {
+      // Within the validator's 1e-9 tolerance, so the refine accepts it — but
+      // persisting it verbatim would later serialize as "0.5000000005" and
+      // make Deepgram 400 every TTS connection with SPEED_INCREMENT_INVALID.
+      mockUserSettingsQueryService.update.mockResolvedValue(undefined);
+      mockUserSettingsQueryService.get.mockResolvedValue({
+        voiceModeEnabled: true,
+        deepgramApiKeyEncrypted: null,
+        voiceTtsModel: 'flux-haley-en',
+        voiceTtsSpeed: 0.5,
+      });
+
+      await createCaller().updateConfig({ enabled: true, ttsSpeed: 0.500_000_000_5 });
+
+      expect(mockUserSettingsQueryService.update).toHaveBeenCalledWith(
+        expect.objectContaining({ voiceTtsSpeed: 0.5 })
+      );
+    });
+
     it('rejects a speed outside the Flux range', async () => {
       await expect(createCaller().updateConfig({ enabled: true, ttsSpeed: 0.25 })).rejects.toThrow(
         /between 0.5 and 1.5/

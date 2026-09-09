@@ -725,7 +725,10 @@ class VoiceNarrationService {
           }
           const message = this.parseControlMessage(data);
           logger.info('Deepgram TTS control message', { sessionId, message });
-          this.handleTtsControlMessage(ttsSocket, message, finish, active.cancelled);
+          this.handleTtsControlMessage(ttsSocket, message, finish, {
+            cancelled: active.cancelled,
+            receivedAudio: chunkCount > 0,
+          });
         });
 
         ttsSocket.on('error', (error) => {
@@ -764,8 +767,9 @@ class VoiceNarrationService {
     ttsSocket: WebSocket,
     message: { type: string } | null,
     finish: () => void,
-    cancelled: boolean
+    state: { cancelled: boolean; receivedAudio: boolean }
   ): void {
+    const { cancelled, receivedAudio } = state;
     if (message?.type === 'SpeechMetadata') {
       try {
         ttsSocket.send(JSON.stringify({ type: 'Close' }));
@@ -778,17 +782,32 @@ class VoiceNarrationService {
       // no more audio is coming for this turn, so finish immediately rather
       // than waiting for a SpeechMetadata that Interrupt may suppress.
       finish();
-    } else if (cancelled && message?.type === 'Warning') {
-      // We sent `Interrupt` (clearActiveNarration), but Deepgram can reply
-      // with a Warning instead of `SpeechInterrupted` — most likely
-      // `NO_AUDIO_GENERATED` (Interrupt raced Deepgram's own turn start, so
-      // there was nothing to interrupt yet), but also possibly
-      // `INTERRUPT_IN_PROGRESS` or `INVALID_INTERRUPT_OFFSET`. Checked on
-      // `type` alone, not the specific `code`, so all three are covered the
-      // same way. A Warning is a "session continues" message that, on its
-      // own, never closes the socket or fires `finish`. Without this branch
-      // `turn.activeTts` stays stuck non-null for the rest of the turn, and
-      // every remaining queued clause silently never speaks.
+    } else if (message?.type === 'Warning' && (cancelled || !receivedAudio)) {
+      // A Warning is a "session continues" message: on its own it never
+      // closes the socket or fires `finish`. There is no watchdog on a
+      // narration socket, so any Warning that turns out to be the last
+      // message of the turn strands `turn.activeTts` non-null for the rest
+      // of the turn, and every remaining queued clause silently never
+      // speaks. Two ways that happens, both ended here:
+      //
+      // 1. `cancelled` — we sent `Interrupt` (clearActiveNarration) and
+      //    Deepgram replied with a Warning instead of `SpeechInterrupted`:
+      //    most likely `NO_AUDIO_GENERATED` (Interrupt raced Deepgram's own
+      //    turn start, so there was nothing to interrupt yet), but possibly
+      //    `INTERRUPT_IN_PROGRESS` or `INVALID_INTERRUPT_OFFSET`.
+      // 2. `!receivedAudio` — an ordinary narration Deepgram declined to
+      //    synthesize at all. `stripMarkdownForSpeech` only rejects text
+      //    that strips to *empty*, so a clause of pure emoji or symbols
+      //    still gets `Speak`/`Flush` and can come back
+      //    `NO_AUDIO_GENERATED` with no `SpeechMetadata` ever following.
+      //
+      // Gated on `receivedAudio` rather than the warning `code` because the
+      // code list isn't contractual. Having received zero audio frames is
+      // what makes ending the clause safe: there is nothing in flight to
+      // truncate, so the worst case is cutting short a clause that had not
+      // begun speaking — strictly better than stalling the whole turn. Once
+      // audio *is* flowing a Warning is treated as informational and we keep
+      // waiting for `SpeechMetadata`, so this can never clip live speech.
       finish();
     }
   }

@@ -14,6 +14,7 @@ import {
   DEEPGRAM_TTS_SPEED_STEP,
   isKnownDeepgramVoiceModel,
   isValidDeepgramTtsSpeed,
+  normalizeDeepgramTtsSpeed,
 } from '@/shared/deepgram-voices';
 import {
   VOICE_BARGE_IN_SUSTAINED_MS_MAX,
@@ -186,7 +187,16 @@ export const voiceRouter = router({
         voiceModeEnabled: input.enabled,
         deepgramApiKeyEncrypted: input.apiKey ? cryptoService.encrypt(input.apiKey) : undefined,
         voiceTtsModel: input.ttsModel,
-        voiceTtsSpeed: input.ttsSpeed,
+        // Snapped to the grid after validation, not instead of it: the
+        // validator's 1e-9 tolerance exists for float slop, but whatever it
+        // lets through is stored verbatim and later serialized verbatim to
+        // Deepgram (`String(settings.voiceTtsSpeed)`). An off-grid near-miss
+        // like 0.5000000005 would pass the refine and then 400 every TTS
+        // connection as SPEED_INCREMENT_INVALID. Normalizing here keeps the
+        // strict rejection of a real near-miss (0.7011 never reaches this
+        // line) while guaranteeing what we persist is exactly on grid.
+        voiceTtsSpeed:
+          input.ttsSpeed === undefined ? undefined : normalizeDeepgramTtsSpeed(input.ttsSpeed),
         voiceUtteranceEndMs: input.utteranceEndMs,
         voiceBargeInSustainedMs: input.bargeInSustainedMs,
       });
