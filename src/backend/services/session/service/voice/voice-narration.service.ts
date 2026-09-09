@@ -774,13 +774,16 @@ class VoiceNarrationService {
       // than waiting for a SpeechMetadata that Interrupt may suppress.
       finish();
     } else if (cancelled && message?.type === 'Warning') {
-      // We sent `Interrupt` (clearActiveNarration), but it can race
-      // Deepgram's own turn start: if Interrupt arrives before Deepgram has
-      // begun this clause's turn, it replies `Warning: NO_ACTIVE_SPEECH`
-      // instead of `SpeechInterrupted` — a "session continues" message that,
-      // on its own, never closes the socket or fires `finish`. Without this
-      // branch `turn.activeTts` stays stuck non-null for the rest of the
-      // turn, and every remaining queued clause silently never speaks.
+      // We sent `Interrupt` (clearActiveNarration), but Deepgram can reply
+      // with a Warning instead of `SpeechInterrupted` — most likely
+      // `NO_AUDIO_GENERATED` (Interrupt raced Deepgram's own turn start, so
+      // there was nothing to interrupt yet), but also possibly
+      // `INTERRUPT_IN_PROGRESS` or `INVALID_INTERRUPT_OFFSET`. Checked on
+      // `type` alone, not the specific `code`, so all three are covered the
+      // same way. A Warning is a "session continues" message that, on its
+      // own, never closes the socket or fires `finish`. Without this branch
+      // `turn.activeTts` stays stuck non-null for the rest of the turn, and
+      // every remaining queued clause silently never speaks.
       finish();
     }
   }

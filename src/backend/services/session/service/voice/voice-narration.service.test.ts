@@ -609,7 +609,8 @@ describe('voiceNarrationService', () => {
 
       // Final answer starts streaming mid-thought, cutting off the thinking
       // clause with Interrupt — but Deepgram hadn't started that clause's
-      // turn yet, so it acks with a Warning (NO_ACTIVE_SPEECH) instead of
+      // turn yet, so it acks with a Warning (NO_AUDIO_GENERATED: "Interrupt
+      // arrived before the session produced any audio") instead of
       // SpeechInterrupted, exactly like Flux does for this race in practice.
       emitDelta('sess-thinking-warn', {
         type: 'session_delta',
@@ -620,7 +621,7 @@ describe('voiceNarrationService', () => {
       });
       thinkingSocket.emit(
         'message',
-        Buffer.from(JSON.stringify({ type: 'Warning', code: 'NO_ACTIVE_SPEECH' })),
+        Buffer.from(JSON.stringify({ type: 'Warning', code: 'NO_AUDIO_GENERATED' })),
         false
       );
 
