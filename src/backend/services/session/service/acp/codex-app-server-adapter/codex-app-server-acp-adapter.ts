@@ -573,14 +573,21 @@ export class CodexAppServerAcpAdapter implements Agent {
   }
 
   private async requestTurnInterrupt(session: AdapterSession): Promise<void> {
-    if (!session.activeTurn || session.activeTurn.turnId === PENDING_TURN_ID) {
+    const turn = session.activeTurn;
+    if (!turn || turn.turnId === PENDING_TURN_ID) {
       return;
     }
 
-    await this.codex.request('turn/interrupt', {
-      threadId: session.threadId,
-      turnId: session.activeTurn.turnId,
-    });
+    try {
+      await this.codex.request('turn/interrupt', {
+        threadId: session.threadId,
+        turnId: turn.turnId,
+      });
+    } catch {
+      if (session.activeTurn === turn) {
+        this.settleTurn(session, 'cancelled');
+      }
+    }
   }
 
   private isActiveTurnCancelRequested(session: AdapterSession): boolean {
@@ -604,15 +611,7 @@ export class CodexAppServerAcpAdapter implements Agent {
     }
 
     session.activeTurn.cancelRequested = true;
-    if (session.activeTurn.turnId === PENDING_TURN_ID) {
-      return;
-    }
-
-    try {
-      await this.requestTurnInterrupt(session);
-    } catch {
-      this.settleTurn(session, 'cancelled');
-    }
+    await this.requestTurnInterrupt(session);
   }
 
   private resolveDefaultModel(): string {
@@ -957,6 +956,9 @@ export class CodexAppServerAcpAdapter implements Agent {
       return;
     }
 
+    if (stopReason === 'cancelled' && session.activeTurn.turnId !== PENDING_TURN_ID) {
+      this.streamEventHandler.markTurnCancelled(session, session.activeTurn.turnId);
+    }
     session.activeTurn.settled = true;
     session.activeTurn.resolve(stopReason);
     session.activeTurn = null;
