@@ -636,6 +636,20 @@ class VoiceNarrationService {
       let byteCount = 0;
 
       await new Promise<void>((resolve) => {
+        // Detaches our handlers and hangs up. The no-op 'error' listener is
+        // load-bearing: closing a socket that is still CONNECTING (a rejected
+        // handshake, which is exactly the `unexpected-response` case below)
+        // makes `ws` abort the handshake and emit 'error'. With every listener
+        // removed that becomes an unhandled 'error' event, which throws out of
+        // an EventEmitter and takes down the process instead of retrying.
+        const detachAndClose = () => {
+          ttsSocket.removeAllListeners();
+          ttsSocket.on('error', () => undefined);
+          if (ttsSocket.readyState !== WebSocket.CLOSED) {
+            ttsSocket.close();
+          }
+        };
+
         const finish = () => {
           logger.info('Finished Deepgram TTS narration', {
             sessionId,
@@ -643,13 +657,7 @@ class VoiceNarrationService {
             chunkCount,
             byteCount,
           });
-          ttsSocket.removeAllListeners();
-          if (
-            ttsSocket.readyState === WebSocket.OPEN ||
-            ttsSocket.readyState === WebSocket.CONNECTING
-          ) {
-            ttsSocket.close();
-          }
+          detachAndClose();
           resolve();
           this.settleNarration(sessionId, ws, turn, active);
         };
@@ -671,10 +679,7 @@ class VoiceNarrationService {
             attempt,
             reason,
           });
-          ttsSocket.removeAllListeners();
-          if (ttsSocket.readyState !== WebSocket.CLOSED) {
-            ttsSocket.close();
-          }
+          detachAndClose();
           resolve();
           setTimeout(() => {
             void this.speakClause(sessionId, ws, turn, rawText, active, attempt + 1);

@@ -43,7 +43,15 @@ const FakeDeepgramSocket = vi.hoisted(() => {
       if (event === 'open') {
         this.readyState = FakeDeepgramSocket.OPEN;
       }
-      for (const handler of this.listeners.get(event) ?? []) {
+      const handlers = this.listeners.get(event) ?? [];
+      // Mirrors EventEmitter: an 'error' with no listener is not swallowed,
+      // it throws. Production code that detaches its handlers and *then*
+      // triggers an error would take the process down, so the fake has to
+      // reproduce that rather than quietly ignoring it.
+      if (event === 'error' && handlers.length === 0) {
+        throw args[0] instanceof Error ? args[0] : new Error('Unhandled error event');
+      }
+      for (const handler of handlers) {
         handler(...args);
       }
     }
@@ -58,7 +66,13 @@ const FakeDeepgramSocket = vi.hoisted(() => {
     }
 
     close(): void {
+      const wasConnecting = this.readyState === FakeDeepgramSocket.CONNECTING;
       this.readyState = FakeDeepgramSocket.CLOSED;
+      // Mirrors `ws`: closing a socket whose handshake never completed goes
+      // through abortHandshake, which emits an 'error'.
+      if (wasConnecting) {
+        this.emit('error', new Error('WebSocket was closed before the connection was established'));
+      }
     }
   }
   return FakeDeepgramSocket;
@@ -895,11 +909,41 @@ describe('voiceNarrationService', () => {
       socket.emit('open');
       socket.emit('error', new Error('connection reset'));
 
-      // Give any (wrongly-scheduled) retry a chance to fire, then confirm it didn't.
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Waits past the 300ms retry delay so a wrongly-scheduled retry would
+      // actually have fired by the time this asserts it didn't.
+      await new Promise((resolve) => setTimeout(resolve, 400));
       expect(FakeDeepgramSocket.instances).toHaveLength(1);
 
       unregister('sess-retry-post-open', clientWs as never);
+    });
+
+    it('retries an unexpected-response rejection without an unhandled error event', async () => {
+      const clientWs = createFakeClientWs();
+      register('sess-retry-unexpected', clientWs as never);
+
+      emitDelta('sess-retry-unexpected', {
+        type: 'session_delta',
+        data: { type: 'assistant_text_delta', text: 'Rejected with an HTTP status. ' },
+      });
+
+      await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 1);
+      const first = FakeDeepgramSocket.instances[0] as InstanceType<typeof FakeDeepgramSocket>;
+      // Deepgram rejects the upgrade with a 400. The socket is still
+      // CONNECTING, so closing it makes `ws` abort the handshake and emit
+      // 'error' — which must not escape as an unhandled error event.
+      expect(() => first.emit('unexpected-response', {}, { statusCode: 400 })).not.toThrow();
+      expect(first.readyState).toBe(FakeDeepgramSocket.CLOSED);
+
+      const second = await vi.waitUntil(
+        () => FakeDeepgramSocket.instances[1] as InstanceType<typeof FakeDeepgramSocket>
+      );
+      second.emit('open');
+      expect(JSON.parse(second.sentMessages[0] as string)).toEqual({
+        type: 'Speak',
+        text: 'Rejected with an HTTP status.',
+      });
+
+      unregister('sess-retry-unexpected', clientWs as never);
     });
   });
 });
