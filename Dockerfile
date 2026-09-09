@@ -1,21 +1,34 @@
 # FactoryFactory Dockerfile
 # Multi-stage build for cloud deployment
 
-ARG NODE_VERSION=22.22
-ARG PNPM_VERSION=10.28.1
+ARG NODE_VERSION=26.8.1
+
+# Node 26 does not bundle Corepack. Share one pinned pnpm installation across stages.
+FROM node:${NODE_VERSION}-alpine AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH="${PNPM_HOME}/bin:${PNPM_HOME}:${PATH}"
+# Keep the pnpm version and release asset SHA-256 digests pinned together.
+# Use musl release archives on Alpine and verify before extraction.
+RUN PNPM_VERSION=12.3.4 \
+  && case "$(uname -m)" in \
+       x86_64) PNPM_ARCH=x64; PNPM_SHA256=e4c4f54599627cc0646fbb2ea8103bd6c88634533fbd6c6f5ca0f6fe7d6f5d9c ;; \
+       aarch64) PNPM_ARCH=arm64; PNPM_SHA256=75c0b268cedbf9b57b69dcef576b9b307dd5b7650c1f967ac1b8f8d6afc1ca25 ;; \
+       *) echo "Unsupported pnpm architecture: $(uname -m)" >&2; exit 1 ;; \
+     esac \
+  && mkdir -p "${PNPM_HOME}" \
+  && wget -qO /tmp/pnpm.tar.gz "https://github.com/pnpm/pnpm/releases/download/v${PNPM_VERSION}/pnpm-linux-${PNPM_ARCH}-musl.tar.gz" \
+  && echo "${PNPM_SHA256}  /tmp/pnpm.tar.gz" | sha256sum -c - \
+  && tar -xzf /tmp/pnpm.tar.gz -C "${PNPM_HOME}" \
+  && rm /tmp/pnpm.tar.gz
 
 # ============================================================================
 # Stage 1: Install dependencies
 # ============================================================================
-FROM node:${NODE_VERSION}-alpine AS deps
-ARG PNPM_VERSION
+FROM base AS deps
 WORKDIR /app
 
 # Build tools for native modules (better-sqlite3, node-pty)
 RUN apk add --no-cache python3 make g++ git libc6-compat
-
-# Enable pnpm
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 # Copy package manifests
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -30,12 +43,10 @@ RUN pnpm install --frozen-lockfile
 # ============================================================================
 # Stage 2: Build application
 # ============================================================================
-FROM node:${NODE_VERSION}-alpine AS builder
-ARG PNPM_VERSION
+FROM base AS builder
 WORKDIR /app
 
 RUN apk add --no-cache git libc6-compat
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 # Copy dependencies from stage 1
 COPY --from=deps /app/node_modules ./node_modules
@@ -57,8 +68,7 @@ RUN pnpm build
 # ============================================================================
 # Stage 3: Production runner
 # ============================================================================
-FROM node:${NODE_VERSION}-alpine AS runner
-ARG PNPM_VERSION
+FROM base AS runner
 WORKDIR /app
 
 # Runtime system dependencies + cloudflared for tunnel + GitHub CLI
@@ -96,10 +106,8 @@ RUN apk add --no-cache \
   && pip3 install --no-cache-dir --break-system-packages pipx \
   && python3 -m pipx ensurepath
 
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
-
 # Install Claude CLI and Codex CLI globally
-RUN npm install -g @anthropic-ai/claude-code @openai/codex
+RUN pnpm add -g --allow-build=@anthropic-ai/claude-code @anthropic-ai/claude-code @openai/codex
 
 # Copy built application
 COPY --from=builder /app/dist ./dist

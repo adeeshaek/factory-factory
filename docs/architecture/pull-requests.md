@@ -39,6 +39,13 @@ observation (`prState`, `prReviewState`, `prCiStatus`, `hasMergeConflict`) via
 changes-requested review would not be visible until the separate PR-sync poller
 caught up.
 
+Live snapshot invalidations go through `RatchetProjectionWorker`, owned by the
+event collector for one start/stop lifetime. It re-reads when invalidations arrive
+during a read, retries failures at 1s and 2s with a three-attempt budget, and
+suppresses archived workspaces and results arriving after stop. The collector
+keeps the event subscriptions and coalesced snapshot writes; reconciliation is
+the safety net after the worker exhausts its retries.
+
 ### Dispatch tracking
 
 Each fixer dispatch is tracked via an explicit record on that row (snapshot key
@@ -63,6 +70,11 @@ without it the WORKING-to-WAITING move would wait for the next reconciliation
 sweep. It is what moves a stuck workspace out of the WORKING column; the
 snapshot key hashes `statusCheckRollup` detail `WorkspacePR` does not store, so
 no reader can re-derive it.
+
+Inline review comment fetches retain at most 2,000 comments, ordered by newest
+update first at the API boundary. Hitting that budget drops older activity rather
+than the newest comment or edit used in the dispatch snapshot. Returned comments
+are in ascending update order.
 
 Review comments belonging to resolved review threads (GraphQL
 `reviewThreads.isResolved`) are excluded from fixer dispatch prompts and from

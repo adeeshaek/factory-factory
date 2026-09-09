@@ -5,17 +5,55 @@ All notable changes to Factory Factory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.7] - 2026-08-24
+## [0.4.8] - 2026-09-09
 
 ### Changed
 
+- Upgrade the supported runtime to Node.js 26.8.1 and pnpm 12.3.4, updating release environments, dependency build permissions, and the verified Docker bootstrap (#2230, #2234)
+- Upgrade the application toolchain to TypeScript 7.0.2, Vite 8.2.2, Vitest 5.0.0, jsdom 30.0.1, Biome 2.5.12, Knip 6.35.0, dependency-cruiser 18.2.0, and related development tools (#2220, #2222, #2247, #2248)
+- Upgrade the ACP SDK to 1.4.0 and Claude ACP to 0.75.1, migrate model switching to the supported configuration API, validate ACP snapshots, share Codex model discovery, and remove transitional runtime callbacks (#2223, #2225, #2226)
+- Refresh Prisma, Storybook, and other compatible dependencies; update the Codex CLI compatibility baseline to 0.153.4 and regenerate its app-server method snapshot (#2218)
+- Upgrade Electron to 44.3.0 and require macOS 13 or newer; migrate clipboard image paste to the asynchronous API and repair desktop packaging (#2249)
+- Upgrade Linear SDK to 94, better-sqlite3 to 13, Chalk to 6, Commander to 15, and DayPicker to 10; migrate the calendar to `@daypicker/react` and preserve its behavior and styling (#2252)
+- Lazy-load application routes and Mermaid diagrams, reuse chat groups during streaming, and skip grouping scans when message arrays are unchanged (#2224, #2233, #2250)
+- Stream workspace snapshots before Git refreshes complete, narrow Git cache invalidation, and extract the authoritative Ratchet projection worker (#2228, #2229, #2232)
+- Extract Admin settings into focused sections and refresh shadcn components while removing unused dependencies (#2227, #2254)
+- Bound workspace file previews and untracked diffs, virtualize large diffs, and move syntax highlighting to a worker (#2251, #2253)
+
+### Fixed
+
+- Recover reordered tool results without dropping valid transcript content (#2236)
+- Preserve stopped session status on clean runtime exits, cancel pending ACP permissions during soft stops, wait for child processes after SIGKILL, and ignore late notifications from cancelled Codex turns (#2235, #2239, #2243, #2246)
+- Show Electron rejection stack traces and stop the backend before quitting after fatal Electron errors (#2238, #2241)
+- Keep the latest pull-request review activity when results reach the pagination limit (#2242)
+- Clean worktrees correctly under symlinked base directories (#2237)
+- Complete startup scripts after their shell exits and count working agents accurately in completion notifications (#2240, #2244)
+- Rebuild and cache Prisma's separate SQLite driver for Electron alongside the N-API driver, and fix calendar cell sizing with Tailwind 4 (#2252)
+
+### Security
+
+- Resolve Dependabot alerts for fast-uri, xmldom, qs, MySQL2, and deepmerge-ts with patched dependency resolutions (#2218)
+- Update Claude ACP's bundled Claude Agent SDK to 0.3.266 for upstream permission-handling fixes through a scoped dependency override (#2252)
+
+### Documentation
+
+- Clarify duplicate list-key stability and refresh agent guidance for current Claude, Codex, and frontier-model practices (#2221, #2245)
+
+## [0.4.7] - 2026-09-08
+
+### Changed
+
+- Publish npm releases through OIDC-authenticated staging, require maintainer approval on npm, and finalize the GitHub release from the original staging run's commit (#2199)
 - Modularize session lifecycle and ACP runtime management into focused services for context, notification delivery, startup, termination, runtime exits, workflow finalization, configuration, prompting, sub-agent browsing, and supervision, with smaller compatibility facades and focused contract suites (#2165, #2170, #2173, #2174, #2175, #2176, #2177, #2179, #2180, #2184)
 - Keep workspaces in Working while Codex goals remain active, including between prompts and after session resume (#2182)
 - Enforce a 1,000-line ceiling for new JavaScript and TypeScript files, ratchet oversized legacy files downward, and reject dangling symlinks from file-length checks (#2155, #2156)
 - Remove obsolete lifecycle test stubs, Electron preload APIs, Git and shell helpers, file traversal utilities, decision-log accessors, GitHub schemas, and issue-closing code (#2178, #2188, #2189, #2190, #2191, #2192, #2193, #2194)
+- Remove unused file-lock and provider-runtime abstractions, session and permission helpers, project and workspace accessors, workspace re-exports, PR review procedures, and file-reference parsing code (#2204, #2205, #2206, #2207, #2210, #2211, #2212, #2213, #2214)
 
 ### Fixed
 
+- Resolve the staged npm tarball as a local file instead of a GitHub repository during release publishing
+- Prevent npm package installation and release smoke tests from deadlocking by running the installed Prisma CLI directly during postinstall
 - Preserve Codex notification ordering, serialize turn completion behind earlier item events, reject empty sub-agent receiver IDs, and validate permission request options before rendering (#2157, #2166, #2167, #2187)
 - Prevent disconnected terminal creation, stale sub-agent tabs after refetch failures, stale voice worklet callbacks, and orphaned Git worktrees after workspace deletion (#2168, #2169, #2171, #2172)
 - Stop sub-agent activity events from canceling long turns and prevent command handoffs from emitting duplicate tool completions (#2186, #2196)

@@ -5,6 +5,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // Let jsdom own browser storage instead of Node's experimental global.
+    execArgv: ['--no-experimental-webstorage'],
     env: {
       NODE_ENV: 'test',
     },
@@ -41,8 +43,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
-      '@prisma-gen': path.resolve(__dirname, './prisma/generated'),
+      '@': path.resolve(import.meta.dirname, './src'),
+      '@prisma-gen': path.resolve(import.meta.dirname, './prisma/generated'),
     },
   },
 });

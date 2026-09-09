@@ -29,7 +29,6 @@ import { reduceToolingSlice } from './slices/tooling';
 import { createBaseResetState, createInitialChatState } from './state';
 import type { AcpToolLocation, ChatAction, ChatState } from './types';
 
-export { createInitialChatState };
 export type {
   AcpConfigOption,
   AcpConfigOptionGroup,
@@ -48,6 +47,7 @@ export type {
   TaskNotification,
   ToolProgressInfo,
 } from './types';
+export { createInitialChatState };
 
 // =============================================================================
 // Reducer Slices
@@ -440,7 +440,12 @@ function handleConfigOptionsUpdateMessage(data: WebSocketMessage): ChatAction | 
   }
   return {
     type: 'CONFIG_OPTIONS_UPDATE',
-    payload: { configOptions },
+    payload: {
+      configOptions: configOptions.filter(
+        (option) =>
+          option && typeof option.currentValue === 'string' && Array.isArray(option.options)
+      ),
+    },
   };
 }
 

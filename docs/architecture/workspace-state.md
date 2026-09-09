@@ -5,7 +5,22 @@ tables. They share a shape: one accessor is the sole writer, and reads flatten
 the row back onto the workspace under the field's original name, so the snapshot
 wire, the v4 export format and the client are unchanged.
 
+Worktree cleanup matches Git's registered paths against the real worktree base
+directory, so a symlinked base still removes Git metadata. It resolves the base
+separately from the worktree so cleanup also works after the worktree is deleted.
+If the base symlink itself no longer resolves, cleanup logs a warning and matches
+only the exact configured path. Restore the original base symlink and retry to
+remove a canonical registration; guessing from a basename or pruning unrelated
+registrations could remove another workspace.
+
 ## Run script
+
+Startup provisioning follows the main shell's exit. Output pipes normally drain
+to closure, with a one-second limit after exit so background descendants that
+inherit the pipes cannot keep provisioning open. Later output is drained and
+discarded until those descendants close their pipes, so writing after provisioning
+does not interrupt them. Persistent background commands should redirect output if
+it needs to remain available after startup.
 
 The workspace's dev server lives in a 1:1 `WorkspaceRunScript` row (`command`,
 `postRunCommand`, `cleanupCommand`, `pid`, `port`, `startedAt`, `status`),
@@ -104,12 +119,37 @@ That endpoint never spawns `git` on its response path: `gitStats` is served from
 returns null while a background warm recomputes it. Awaiting those recomputes is
 what used to hold the board on its loading state — a worktree's stats cost
 several `git` spawns and a project with dozens of live workspaces serialized all
-of them behind the one query (~20s at 68 worktrees). `gitStats` is a
-reconciliation field, so the snapshot poll recomputes it for every live
-workspace each minute and streams it into the same cache; a card is missing its
-diff badge for a moment rather than the board being missing entirely.
+of them behind the one query (~20s at 68 worktrees).
 
-Note that each worktree's cache entry is watched via the repo's *shared* `.git`
-common dir, so git activity in any one worktree invalidates the others' entries
-— the cache is cold more often than a per-worktree watcher would suggest, which
-is exactly why the response path must not depend on it being warm.
+`gitStats` is a reconciliation field. Each snapshot poll first seeds all
+database and runtime fields, retaining any cached Git stats, then releases the
+startup snapshot barrier. It recomputes Git stats with bounded concurrency and
+publishes each workspace as soon as its Git commands finish; one slow worktree
+cannot hold the rest of the board. A failed Git refresh retains a non-null
+cached value, while a workspace that no longer has a worktree is explicitly
+cleared to null. Git stats have their own optional timestamp group, so the
+seed's `lastActivityAt` and the later Git update can carry the same poll-start
+timestamp without weakening either field's stale-update protection. The
+optional timestamp keeps older snapshot payloads valid during upgrades. A card
+can be missing its diff badge for a moment rather than the board being missing
+entirely.
+
+Each cache entry watches its worktree and private Git directory, while linked
+worktrees share one reference-counted watcher for the repo's common `.git`
+directory. Worktree files and private metadata such as `HEAD`, `index`, and
+`config.worktree` invalidate only their owning worktree. Common metadata changes
+invalidate every dependent entry, including shared config, refs, info attributes
+and excludes, and reftable state. Object and reflog writes are ignored because
+the associated ref event performs the invalidation. If the shared watcher fails,
+all of its dependents switch to the five-minute fallback expiry; removing the
+last dependent closes it.
+
+## Completion notifications
+
+Workspace completion notifications count the distinct sessions that worked in
+the uninterrupted busy interval ending at the idle transition. Historical idle
+sessions do not inflate the count, and repeated turns from one session count
+once. The idle event captures the count before the asynchronous workspace lookup,
+so a subsequent interval cannot change an earlier notification. Lookups and
+notification requests run in idle order per workspace; a failed lookup does not
+block later intervals, and separate workspaces can proceed independently.

@@ -38,6 +38,7 @@ type CodexNotificationPayload = {
 type KnownCodexNotification = ReturnType<typeof knownCodexNotificationSchema.parse>;
 
 const MAX_SYNTHETIC_COMPLETION_TOMBSTONES = 1000;
+const MAX_CANCELLED_TURNS = 128;
 
 function metaUpdate(meta: ToolCallState['meta']): Record<string, unknown> {
   return meta ? { _meta: meta } : {};
@@ -85,6 +86,7 @@ type StreamEventHandlerDeps = {
 };
 
 export class CodexStreamEventHandler {
+  private readonly cancelledTurns = new WeakMap<AdapterSession, Set<string>>();
   private readonly goalRefreshStateByThreadId = new Map<
     string,
     { notificationVersion: number; pendingRefreshCount: number }
@@ -95,6 +97,24 @@ export class CodexStreamEventHandler {
   >();
 
   constructor(private readonly deps: StreamEventHandlerDeps) {}
+
+  markTurnCancelled(session: AdapterSession, turnId: string): void {
+    const turns = this.cancelledTurns.get(session) ?? new Set<string>();
+    this.cancelledTurns.set(session, turns);
+    turns.add(turnId);
+    if (turns.size > MAX_CANCELLED_TURNS) {
+      const oldest = turns.values().next().value;
+      if (oldest !== undefined) {
+        turns.delete(oldest);
+        this.deps.reportShapeDrift('cancelled_turn_history_evicted', {
+          sessionId: session.sessionId,
+          threadId: session.threadId,
+          turnId: oldest,
+          limit: MAX_CANCELLED_TURNS,
+        });
+      }
+    }
+  }
 
   async replayThreadHistory(sessionId: string, threadId: string): Promise<void> {
     const session = this.deps.requireSession(sessionId);
@@ -196,17 +216,17 @@ export class CodexStreamEventHandler {
       return;
     }
 
+    const session = this.getSessionForThread(typedNotification.params.threadId);
+    if (this.isNotificationCancelled(session, typedNotification)) {
+      return;
+    }
+
     await this.deps.handleSubagentTranscriptActivity?.(typedNotification.params.threadId);
 
-    const sessionId = this.deps.sessionIdByThreadId.get(typedNotification.params.threadId);
-    if (!sessionId) {
+    if (!this.isLiveNotification(session, typedNotification)) {
       return;
     }
-
-    const session = this.deps.sessions.get(sessionId);
-    if (!session) {
-      return;
-    }
+    const sessionId = session.sessionId;
 
     if (typedNotification.method === 'item/agentMessage/delta') {
       await this.deps.emitSessionUpdate(sessionId, {
@@ -303,6 +323,35 @@ export class CodexStreamEventHandler {
         typedNotification.params.turn.error?.message
       );
     }
+  }
+
+  private getSessionForThread(threadId: string): AdapterSession | undefined {
+    const sessionId = this.deps.sessionIdByThreadId.get(threadId);
+    return sessionId ? this.deps.sessions.get(sessionId) : undefined;
+  }
+
+  private isLiveNotification(
+    session: AdapterSession | undefined,
+    notification: KnownCodexNotification
+  ): session is AdapterSession {
+    const current = session && this.getSessionForThread(session.threadId);
+    return !!session && current === session && !this.isNotificationCancelled(session, notification);
+  }
+
+  private isNotificationCancelled(
+    session: AdapterSession | undefined,
+    notification: KnownCodexNotification
+  ): boolean {
+    if (!session) {
+      return false;
+    }
+    const turnId =
+      notification.method === 'turn/completed'
+        ? notification.params.turn.id
+        : 'turnId' in notification.params
+          ? notification.params.turnId
+          : undefined;
+    return typeof turnId === 'string' && this.cancelledTurns.get(session)?.has(turnId) === true;
   }
 
   private async handleThreadNotification(notification: KnownCodexNotification): Promise<boolean> {
@@ -940,13 +989,11 @@ export class CodexStreamEventHandler {
 }
 
 function subagentChangeForItem(item: Record<string, unknown>): 'created' | 'updated' | 'completed' {
-  if (item.type === 'subAgentActivity') {
-    if (item.kind === 'started') {
-      return 'created';
-    }
-    if (item.kind === 'interrupted') {
-      return 'completed';
-    }
+  if (item.type === 'subAgentActivity' && item.kind === 'started') {
+    return 'created';
+  }
+  if (item.type === 'subAgentActivity' && item.kind === 'interrupted') {
+    return 'completed';
   }
   return 'updated';
 }

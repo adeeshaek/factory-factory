@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { workerSafeAliases } from './scripts/vite-worker-aliases';
 
 // Backend URL is set by the CLI when running in development mode
 const backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
@@ -21,8 +22,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src'),
-      '@prisma-gen': resolve(__dirname, './prisma/generated'),
+      ...workerSafeAliases,
+      '@': resolve(import.meta.dirname, './src'),
+      '@prisma-gen': resolve(import.meta.dirname, './prisma/generated'),
     },
   },
   build: {

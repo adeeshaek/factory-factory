@@ -27,7 +27,8 @@ Factory Factory is a local workspace manager for AI coding agents. Every workspa
 
 You will need:
 
-- Node.js 22.22+ or 24+
+- Node.js 26.8.1+ for the CLI and development (pinned in `.node-version`); the desktop app uses Electron's bundled Node.js runtime
+- macOS 13 (Ventura) or newer for the macOS desktop app
 - A local git repository
 - At least one agent provider:
   - Claude Code, authenticated with `claude login`
@@ -41,6 +42,8 @@ npx factory-factory@latest serve
 ```
 
 Factory Factory opens in your browser and stores its database in `~/factory-factory/` by default.
+
+See [Settings](docs/admin-settings.md) for IDE commands, default chat models, and project configuration.
 
 Then:
 
@@ -103,6 +106,15 @@ By default the server rejects WebSocket upgrades that carry client-address heade
 Use Factory Factory only with repositories and agent instructions you trust. Review changes before merging, protect your GitHub and Linear credentials, and consider a VM or container when working with untrusted code.
 
 ## Development
+
+Use pnpm 12.3.4, pinned in `package.json`. Dependency build permissions live in
+`pnpm-workspace.yaml` under `allowBuilds`; review new build scripts with
+`pnpm approve-builds` when adding or updating dependencies.
+
+Development requires Git 2.32 or newer for lint-staged. Builds and typechecks use
+TypeScript 7 through the `@typescript/native` package alias. The `typescript`
+alias provides Microsoft's TypeScript 6 compatibility API for guardrail scripts
+and tools that parse source files; `tsc` runs version 7 and `tsc6` runs version 6.
 
 ```bash
 git clone https://github.com/purplefish-ai/factory-factory.git
