@@ -596,6 +596,51 @@ describe('voiceNarrationService', () => {
       unregister('sess-thinking-3', clientWs as never);
     });
 
+    it('settles a cancelled clause on a Warning ack, not just SpeechInterrupted, so later clauses are not stuck forever', async () => {
+      const clientWs = createFakeClientWs();
+      register('sess-thinking-warn', clientWs as never);
+
+      emitThinking('sess-thinking-warn', 'Reasoning about the approach now. ');
+      await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 1);
+      const thinkingSocket = FakeDeepgramSocket.instances[0] as InstanceType<
+        typeof FakeDeepgramSocket
+      >;
+      thinkingSocket.emit('open');
+
+      // Final answer starts streaming mid-thought, cutting off the thinking
+      // clause with Interrupt — but Deepgram hadn't started that clause's
+      // turn yet, so it acks with a Warning (NO_ACTIVE_SPEECH) instead of
+      // SpeechInterrupted, exactly like Flux does for this race in practice.
+      emitDelta('sess-thinking-warn', {
+        type: 'session_delta',
+        data: {
+          type: 'assistant_text_delta',
+          text: 'The final answer clause. Second final clause. ',
+        },
+      });
+      thinkingSocket.emit(
+        'message',
+        Buffer.from(JSON.stringify({ type: 'Warning', code: 'NO_ACTIVE_SPEECH' })),
+        false
+      );
+
+      // Without settling on the Warning, activeTts stays stuck on the
+      // cancelled thinking clause and no final-answer socket ever opens.
+      await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 2);
+      const first = FakeDeepgramSocket.instances[1] as InstanceType<typeof FakeDeepgramSocket>;
+      first.emit('open');
+      expect(JSON.parse(first.sentMessages[0] as string).text).toBe('The final answer clause.');
+
+      // And the queue keeps draining past the first clause too.
+      first.emit('message', Buffer.from(JSON.stringify({ type: 'SpeechMetadata' })), false);
+      await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 3);
+      const second = FakeDeepgramSocket.instances[2] as InstanceType<typeof FakeDeepgramSocket>;
+      second.emit('open');
+      expect(JSON.parse(second.sentMessages[0] as string).text).toBe('Second final clause.');
+
+      unregister('sess-thinking-warn', clientWs as never);
+    });
+
     it('claims activeTts synchronously so a synchronous burst of thinking deltas cannot spawn duplicate sockets', async () => {
       const clientWs = createFakeClientWs();
       register('sess-burst', clientWs as never);

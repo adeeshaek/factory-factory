@@ -669,7 +669,7 @@ class VoiceNarrationService {
           }
           const message = this.parseControlMessage(data);
           logger.info('Deepgram TTS control message', { sessionId, message });
-          this.handleTtsControlMessage(ttsSocket, message, finish);
+          this.handleTtsControlMessage(ttsSocket, message, finish, active.cancelled);
         });
 
         ttsSocket.on('error', (error) => {
@@ -703,7 +703,8 @@ class VoiceNarrationService {
   private handleTtsControlMessage(
     ttsSocket: WebSocket,
     message: { type: string } | null,
-    finish: () => void
+    finish: () => void,
+    cancelled: boolean
   ): void {
     if (message?.type === 'SpeechMetadata') {
       try {
@@ -716,6 +717,15 @@ class VoiceNarrationService {
       // Interrupted mid-utterance (thinking cut short by the final answer) —
       // no more audio is coming for this turn, so finish immediately rather
       // than waiting for a SpeechMetadata that Interrupt may suppress.
+      finish();
+    } else if (cancelled && message?.type === 'Warning') {
+      // We sent `Interrupt` (clearActiveNarration), but it can race
+      // Deepgram's own turn start: if Interrupt arrives before Deepgram has
+      // begun this clause's turn, it replies `Warning: NO_ACTIVE_SPEECH`
+      // instead of `SpeechInterrupted` — a "session continues" message that,
+      // on its own, never closes the socket or fires `finish`. Without this
+      // branch `turn.activeTts` stays stuck non-null for the rest of the
+      // turn, and every remaining queued clause silently never speaks.
       finish();
     }
   }
