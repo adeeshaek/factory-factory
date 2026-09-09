@@ -692,13 +692,20 @@ class VoiceNarrationService {
     }
   }
 
-  /** Handles Deepgram's Flushed (utterance complete) and SpeechInterrupted (interrupted) control messages. */
+  /**
+   * Handles Deepgram's Flux TTS control messages. `Flushed` only acks that
+   * the text buffer was processed — every audio frame for the turn arrives
+   * between `SpeechStarted` and `SpeechMetadata`, so `SpeechMetadata` (not
+   * `Flushed`) is the real "all audio sent" signal. Closing on `Flushed`
+   * would hang up before Deepgram ever streams the audio (this was a real
+   * bug: every narration completed with 0 bytes forwarded until this fix).
+   */
   private handleTtsControlMessage(
     ttsSocket: WebSocket,
     message: { type: string } | null,
     finish: () => void
   ): void {
-    if (message?.type === 'Flushed') {
+    if (message?.type === 'SpeechMetadata') {
       try {
         ttsSocket.send(JSON.stringify({ type: 'Close' }));
       } catch {
@@ -706,7 +713,9 @@ class VoiceNarrationService {
       }
       finish();
     } else if (message?.type === 'SpeechInterrupted') {
-      // Interrupted mid-utterance (thinking cut short by the final answer).
+      // Interrupted mid-utterance (thinking cut short by the final answer) —
+      // no more audio is coming for this turn, so finish immediately rather
+      // than waiting for a SpeechMetadata that Interrupt may suppress.
       finish();
     }
   }

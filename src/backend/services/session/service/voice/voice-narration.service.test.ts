@@ -284,7 +284,7 @@ describe('voiceNarrationService', () => {
       data: audioBytes.toString('base64'),
     });
 
-    ttsSocket.emit('message', Buffer.from(JSON.stringify({ type: 'Flushed' })), false);
+    ttsSocket.emit('message', Buffer.from(JSON.stringify({ type: 'SpeechMetadata' })), false);
     expect(JSON.parse(ttsSocket.sentMessages[2] as string)).toEqual({ type: 'Close' });
 
     unregister('sess-speak', clientWs as never);
@@ -524,15 +524,15 @@ describe('voiceNarrationService', () => {
       emitThinking('sess-thinking-2', 'First thought completed here. ');
       await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 1);
 
-      // Still speaking (no Flushed/SpeechInterrupted yet) — this clause
-      // should be dropped, not queued, so the backlog never grows.
+      // Still speaking (no SpeechMetadata/SpeechInterrupted yet) — this
+      // clause should be dropped, not queued, so the backlog never grows.
       emitThinking('sess-thinking-2', 'Second thought completed here too. ');
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(FakeDeepgramSocket.instances).toHaveLength(1);
 
       // Free up the queue; a fresh clause afterwards should speak normally.
       const first = FakeDeepgramSocket.instances[0] as InstanceType<typeof FakeDeepgramSocket>;
-      first.emit('message', Buffer.from(JSON.stringify({ type: 'Flushed' })), false);
+      first.emit('message', Buffer.from(JSON.stringify({ type: 'SpeechMetadata' })), false);
 
       emitThinking('sess-thinking-2', 'Third thought completed here. ');
       await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 2);
@@ -727,13 +727,13 @@ describe('voiceNarrationService', () => {
       first.emit('open');
       expect(JSON.parse(first.sentMessages[0] as string).text).toBe('Sentence one is here.');
 
-      first.emit('message', Buffer.from(JSON.stringify({ type: 'Flushed' })), false);
+      first.emit('message', Buffer.from(JSON.stringify({ type: 'SpeechMetadata' })), false);
       await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 2);
       const second = FakeDeepgramSocket.instances[1] as InstanceType<typeof FakeDeepgramSocket>;
       second.emit('open');
       expect(JSON.parse(second.sentMessages[0] as string).text).toBe('Sentence two is here.');
 
-      second.emit('message', Buffer.from(JSON.stringify({ type: 'Flushed' })), false);
+      second.emit('message', Buffer.from(JSON.stringify({ type: 'SpeechMetadata' })), false);
       await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 3);
       const third = FakeDeepgramSocket.instances[2] as InstanceType<typeof FakeDeepgramSocket>;
       third.emit('open');
