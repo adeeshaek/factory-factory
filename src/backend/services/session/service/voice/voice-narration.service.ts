@@ -42,6 +42,7 @@ import {
   sessionEventBus,
 } from '@/backend/services/session/service/session-event-bus';
 import { userSettingsService } from '@/backend/services/settings';
+import { normalizeDeepgramTtsSpeed } from '@/shared/deepgram-voices';
 import type { VoiceServerMessage } from '@/shared/websocket/voice-message.schema';
 
 const logger = createLogger('voice-narration');
@@ -68,6 +69,12 @@ const MAX_CLAUSE_LENGTH = 220;
 const MIN_CLAUSE_LENGTH = 12;
 
 type NarrationKind = 'thinking' | 'final';
+
+/** A Deepgram TTS JSON control frame, narrowed from the wire. */
+interface ControlMessage {
+  type: string;
+  code?: string;
+}
 
 interface ActiveNarration {
   // Created and assigned to turn.activeTts synchronously by the caller,
@@ -612,18 +619,25 @@ class VoiceNarrationService {
         return;
       }
 
+      // Normalized on read, not trusted from storage: the grid was only
+      // enforced at the write boundary from this release on, so a row saved
+      // under the old bounds-only validation can still hold an off-grid
+      // speed like 0.72 that Deepgram rejects with SPEED_INCREMENT_INVALID
+      // on every connection. Healing it here covers legacy rows whatever
+      // wrote them, and is a no-op for a value already on the grid.
+      const speed = normalizeDeepgramTtsSpeed(settings.voiceTtsSpeed);
       const params = new URLSearchParams({
         model: settings.voiceTtsModel,
         encoding: TTS_ENCODING,
         sample_rate: String(TTS_SAMPLE_RATE),
-        speed: String(settings.voiceTtsSpeed),
+        speed: String(speed),
       });
       logger.info('Opening Deepgram TTS connection', {
         sessionId,
         kind: active.kind,
         textLength: text.length,
         model: settings.voiceTtsModel,
-        speed: settings.voiceTtsSpeed,
+        speed,
         attempt,
       });
       const ttsSocket = new WebSocket(`${DEEPGRAM_TTS_URL}?${params.toString()}`, {
@@ -765,11 +779,10 @@ class VoiceNarrationService {
    */
   private handleTtsControlMessage(
     ttsSocket: WebSocket,
-    message: { type: string } | null,
+    message: ControlMessage | null,
     finish: () => void,
     state: { cancelled: boolean; receivedAudio: boolean }
   ): void {
-    const { cancelled, receivedAudio } = state;
     if (message?.type === 'SpeechMetadata') {
       try {
         ttsSocket.send(JSON.stringify({ type: 'Close' }));
@@ -782,42 +795,57 @@ class VoiceNarrationService {
       // no more audio is coming for this turn, so finish immediately rather
       // than waiting for a SpeechMetadata that Interrupt may suppress.
       finish();
-    } else if (message?.type === 'Warning' && (cancelled || !receivedAudio)) {
+    } else if (message?.type === 'Warning' && this.isTerminalWarning(message, state)) {
       // A Warning is a "session continues" message: on its own it never
-      // closes the socket or fires `finish`. There is no watchdog on a
-      // narration socket, so any Warning that turns out to be the last
-      // message of the turn strands `turn.activeTts` non-null for the rest
-      // of the turn, and every remaining queued clause silently never
-      // speaks. Two ways that happens, both ended here:
-      //
-      // 1. `cancelled` — we sent `Interrupt` (clearActiveNarration) and
-      //    Deepgram replied with a Warning instead of `SpeechInterrupted`:
-      //    most likely `NO_AUDIO_GENERATED` (Interrupt raced Deepgram's own
-      //    turn start, so there was nothing to interrupt yet), but possibly
-      //    `INTERRUPT_IN_PROGRESS` or `INVALID_INTERRUPT_OFFSET`.
-      // 2. `!receivedAudio` — an ordinary narration Deepgram declined to
-      //    synthesize at all. `stripMarkdownForSpeech` only rejects text
-      //    that strips to *empty*, so a clause of pure emoji or symbols
-      //    still gets `Speak`/`Flush` and can come back
-      //    `NO_AUDIO_GENERATED` with no `SpeechMetadata` ever following.
-      //
-      // Gated on `receivedAudio` rather than the warning `code` because the
-      // code list isn't contractual. Having received zero audio frames is
-      // what makes ending the clause safe: there is nothing in flight to
-      // truncate, so the worst case is cutting short a clause that had not
-      // begun speaking — strictly better than stalling the whole turn. Once
-      // audio *is* flowing a Warning is treated as informational and we keep
-      // waiting for `SpeechMetadata`, so this can never clip live speech.
+      // closes the socket or fires `finish`. With no watchdog on a narration
+      // socket, a Warning that turns out to be the turn's last message
+      // strands `turn.activeTts` non-null and every remaining queued clause
+      // silently never speaks.
       finish();
     }
   }
 
-  private parseControlMessage(data: Buffer): { type: string } | null {
+  /**
+   * Whether a `Warning` means no more audio is coming for this clause.
+   *
+   * Cancelled: we sent `Interrupt` (clearActiveNarration) and Deepgram
+   * answered with a Warning rather than `SpeechInterrupted` — most likely
+   * `NO_AUDIO_GENERATED` (Interrupt raced Deepgram's own turn start), but
+   * possibly `INTERRUPT_IN_PROGRESS` or `INVALID_INTERRUPT_OFFSET`. Matched
+   * on `type` alone so all three behave the same; nothing is left to play
+   * either way, since the whole point of the Interrupt was to stop it.
+   *
+   * Uncancelled: only `NO_AUDIO_GENERATED`, and only before the first audio
+   * frame. `stripMarkdownForSpeech` rejects text that strips to *empty*, so
+   * a clause of pure emoji or symbols is still sent and can come back
+   * `NO_AUDIO_GENERATED` with no `SpeechMetadata` ever following. Any other
+   * warning stays informational here: an unrecognized one arriving before
+   * the first frame may well be followed by audio, and ending the clause on
+   * it would drop speech that was about to play.
+   */
+  private isTerminalWarning(
+    message: ControlMessage,
+    state: { cancelled: boolean; receivedAudio: boolean }
+  ): boolean {
+    if (state.cancelled) {
+      return true;
+    }
+    return !state.receivedAudio && message.code === 'NO_AUDIO_GENERATED';
+  }
+
+  private parseControlMessage(data: Buffer): ControlMessage | null {
     try {
       const parsed = JSON.parse(data.toString('utf8'));
-      return parsed && typeof parsed === 'object' && typeof parsed.type === 'string'
-        ? parsed
-        : null;
+      if (!parsed || typeof parsed !== 'object' || typeof parsed.type !== 'string') {
+        return null;
+      }
+      // `code` is narrowed alongside `type` rather than cast at the use site:
+      // a Warning's code decides whether the clause ends, so a non-string
+      // `code` must read as absent instead of being trusted.
+      return {
+        type: parsed.type,
+        code: typeof parsed.code === 'string' ? parsed.code : undefined,
+      };
     } catch {
       return null;
     }
