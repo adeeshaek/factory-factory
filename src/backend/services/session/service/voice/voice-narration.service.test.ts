@@ -813,4 +813,92 @@ describe('voiceNarrationService', () => {
       unregister('sess-trailing', clientWs as never);
     });
   });
+
+  describe('connection retry', () => {
+    it('retries a handshake failure that happens before open, and still speaks the clause', async () => {
+      const clientWs = createFakeClientWs();
+      register('sess-retry-ok', clientWs as never);
+
+      emitDelta('sess-retry-ok', {
+        type: 'session_delta',
+        data: {
+          type: 'assistant_text_delta',
+          text: 'This clause should survive one bad handshake. ',
+        },
+      });
+
+      await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 1);
+      const first = FakeDeepgramSocket.instances[0] as InstanceType<typeof FakeDeepgramSocket>;
+      // Fails before 'open' — the exact shape of a rejected handshake, as
+      // opposed to a mid-stream error after audio has already started.
+      first.emit('error', new Error('socket hang up'));
+
+      // A second connection attempt should follow after the retry delay.
+      await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 2);
+      const second = FakeDeepgramSocket.instances[1] as InstanceType<typeof FakeDeepgramSocket>;
+      second.emit('open');
+      expect(JSON.parse(second.sentMessages[0] as string)).toEqual({
+        type: 'Speak',
+        text: 'This clause should survive one bad handshake.',
+      });
+
+      unregister('sess-retry-ok', clientWs as never);
+    });
+
+    it('gives up after exhausting retries and still drains the next queued clause', async () => {
+      const clientWs = createFakeClientWs();
+      register('sess-retry-exhausted', clientWs as never);
+
+      emitDelta('sess-retry-exhausted', {
+        type: 'session_delta',
+        data: {
+          type: 'assistant_text_delta',
+          text: 'This clause always fails to connect. Second clause speaks fine. ',
+        },
+      });
+
+      // Fail three times in a row (initial attempt + two retries) — every
+      // attempt for the first clause.
+      for (let i = 0; i < 3; i++) {
+        await vi.waitUntil(() => FakeDeepgramSocket.instances.length === i + 1);
+        const socket = FakeDeepgramSocket.instances[i] as InstanceType<typeof FakeDeepgramSocket>;
+        socket.emit('error', new Error('socket hang up'));
+      }
+
+      // No further retry beyond the third attempt — but the queue still
+      // drains: the second clause gets its own fresh connection.
+      await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 4);
+      const secondClause = FakeDeepgramSocket.instances[3] as InstanceType<
+        typeof FakeDeepgramSocket
+      >;
+      secondClause.emit('open');
+      expect(JSON.parse(secondClause.sentMessages[0] as string)).toEqual({
+        type: 'Speak',
+        text: 'Second clause speaks fine.',
+      });
+
+      unregister('sess-retry-exhausted', clientWs as never);
+    });
+
+    it('does not retry a failure that happens after the socket already opened', async () => {
+      const clientWs = createFakeClientWs();
+      register('sess-retry-post-open', clientWs as never);
+
+      emitDelta('sess-retry-post-open', {
+        type: 'session_delta',
+        data: { type: 'assistant_text_delta', text: 'Opens fine then drops mid-stream. ' },
+      });
+
+      await vi.waitUntil(() => FakeDeepgramSocket.instances.length === 1);
+      const socket = FakeDeepgramSocket.instances[0] as InstanceType<typeof FakeDeepgramSocket>;
+      socket.emit('open');
+      socket.emit('error', new Error('connection reset'));
+
+      // Give any (wrongly-scheduled) retry a chance to fire, then confirm it didn't.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(FakeDeepgramSocket.instances).toHaveLength(1);
+
+      unregister('sess-retry-post-open', clientWs as never);
+    });
+  });
 });

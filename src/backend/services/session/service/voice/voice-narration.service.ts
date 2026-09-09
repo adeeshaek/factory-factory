@@ -50,6 +50,16 @@ const DEEPGRAM_TTS_URL = 'wss://api.deepgram.com/v2/speak';
 const TTS_ENCODING = 'linear16';
 const TTS_SAMPLE_RATE = 24_000;
 
+// Deepgram's v2/speak handshake has been observed to fail transiently in
+// bursts (HTTP 400 on otherwise-valid, previously-and-subsequently-working
+// requests) — verified live against a real account: identical requests
+// rejected several times in a row, then succeeding 40/40 minutes later. A
+// clause that fails before any audio arrives is worth retrying rather than
+// silently dropping — otherwise a transient Deepgram-side blip reads as the
+// agent randomly skipping sentences.
+const TTS_CONNECT_MAX_RETRIES = 2;
+const TTS_CONNECT_RETRY_DELAY_MS = 300;
+
 /** Sentence-ending punctuation followed by whitespace or end of buffer. */
 const CLAUSE_BOUNDARY_PATTERN = /[.!?](?:\s|$)/;
 /** Cut an unpunctuated thought here so it can't buffer forever. */
@@ -554,7 +564,8 @@ class VoiceNarrationService {
     ws: WebSocket,
     turn: TurnState,
     rawText: string,
-    active: ActiveNarration
+    active: ActiveNarration,
+    attempt = 0
   ): Promise<void> {
     try {
       let cached = turn.voiceSettings;
@@ -591,6 +602,16 @@ class VoiceNarrationService {
         return;
       }
 
+      // Re-checked here (not just before the `await` above) because a
+      // connect-failure retry re-enters this function after a `setTimeout`
+      // delay with `cached` already set, skipping that earlier check
+      // entirely — without this, a clause cancelled mid-retry-wait would
+      // still go on to open a fresh connection and speak stale text.
+      if (active.cancelled) {
+        this.settleNarration(sessionId, ws, turn, active);
+        return;
+      }
+
       const params = new URLSearchParams({
         model: settings.voiceTtsModel,
         encoding: TTS_ENCODING,
@@ -603,12 +624,14 @@ class VoiceNarrationService {
         textLength: text.length,
         model: settings.voiceTtsModel,
         speed: settings.voiceTtsSpeed,
+        attempt,
       });
       const ttsSocket = new WebSocket(`${DEEPGRAM_TTS_URL}?${params.toString()}`, {
         headers: { Authorization: `Token ${apiKey}` },
       });
       active.socket = ttsSocket;
 
+      let opened = false;
       let chunkCount = 0;
       let byteCount = 0;
 
@@ -631,7 +654,35 @@ class VoiceNarrationService {
           this.settleNarration(sessionId, ws, turn, active);
         };
 
+        // Only for a failure *before* the handshake completed — a socket
+        // that already opened may have started sending audio, and retrying
+        // from scratch there would replay or garble what was already
+        // spoken. `resolve()` without `settleNarration` deliberately leaves
+        // `turn.activeTts` claimed by `active` across the retry, so no other
+        // queued clause can start in the gap.
+        const retryOrFinish = (reason: string) => {
+          if (active.cancelled || opened || attempt >= TTS_CONNECT_MAX_RETRIES) {
+            finish();
+            return;
+          }
+          logger.warn('Deepgram TTS handshake failed before opening; retrying', {
+            sessionId,
+            kind: active.kind,
+            attempt,
+            reason,
+          });
+          ttsSocket.removeAllListeners();
+          if (ttsSocket.readyState !== WebSocket.CLOSED) {
+            ttsSocket.close();
+          }
+          resolve();
+          setTimeout(() => {
+            void this.speakClause(sessionId, ws, turn, rawText, active, attempt + 1);
+          }, TTS_CONNECT_RETRY_DELAY_MS);
+        };
+
         ttsSocket.on('open', () => {
+          opened = true;
           if (active.cancelled) {
             finish();
             return;
@@ -674,7 +725,11 @@ class VoiceNarrationService {
 
         ttsSocket.on('error', (error) => {
           logger.error('Deepgram TTS connection error', { error: error.message, sessionId });
-          finish();
+          retryOrFinish(error.message);
+        });
+
+        ttsSocket.on('unexpected-response', (_req, res: { statusCode?: number }) => {
+          retryOrFinish(`unexpected-response ${res.statusCode ?? 'unknown'}`);
         });
 
         ttsSocket.on('close', finish);
