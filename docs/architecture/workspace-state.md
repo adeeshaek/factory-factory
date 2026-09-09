@@ -5,6 +5,14 @@ tables. They share a shape: one accessor is the sole writer, and reads flatten
 the row back onto the workspace under the field's original name, so the snapshot
 wire, the v4 export format and the client are unchanged.
 
+Worktree cleanup matches Git's registered paths against the real worktree base
+directory, so a symlinked base still removes Git metadata. It resolves the base
+separately from the worktree so cleanup also works after the worktree is deleted.
+If the base symlink itself no longer resolves, cleanup logs a warning and matches
+only the exact configured path. Restore the original base symlink and retry to
+remove a canonical registration; guessing from a basename or pruning unrelated
+registrations could remove another workspace.
+
 ## Run script
 
 The workspace's dev server lives in a 1:1 `WorkspaceRunScript` row (`command`,
